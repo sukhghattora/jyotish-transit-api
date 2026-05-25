@@ -5,6 +5,9 @@ import swisseph as swe
 
 app = FastAPI(title="Jyotish Transit API", version="1.0.0")
 
+# Use Moshier built-in algorithm — no external ephemeris files required
+swe.set_ephe_path("")
+
 # ── Planet map ────────────────────────────────────────────────────────────────
 PLANETS = {
     "Sun":     swe.SUN,
@@ -50,7 +53,8 @@ def to_jd(year, month, day, hour, minute, second, tz_offset):
 
 
 def planet_lon(jd, planet_id):
-    flags = swe.FLG_SWIEPH | swe.FLG_SPEED
+    # FLG_MOSEPH = built-in Moshier algorithm — no .se1 data files needed
+    flags = swe.FLG_MOSEPH | swe.FLG_SPEED
     result, _ = swe.calc_ut(jd, planet_id, flags)
     return result[0]   # tropical longitude
 
