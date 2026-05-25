@@ -34,6 +34,16 @@ Swiss Ephemeris microservice for real-time Vedic transit calculations.
 }
 ```
 
+### `GET /prompt`
+
+Returns the canonical system prompt for the n8n AI node — no remedies, pure transit interpretation.
+
+```json
+{ "system_prompt": "You are a Jyotish (Vedic astrology) expert..." }
+```
+
+Use this in your n8n HTTP Request node to keep the prompt version-controlled alongside the API. In your AI node, set the system prompt to the value returned by this endpoint.
+
 ### `GET /health`
 Returns `{"status": "ok"}`.
 

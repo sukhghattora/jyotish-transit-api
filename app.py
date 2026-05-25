@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
+from pathlib import Path
 import swisseph as swe
 
 app = FastAPI(title="Jyotish Transit API", version="1.0.0")
@@ -126,6 +127,12 @@ class TransitRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "jyotish-transit-api"}
+
+
+@app.get("/prompt")
+def get_prompt():
+    prompt_path = Path(__file__).parent / "system_prompt.txt"
+    return {"system_prompt": prompt_path.read_text()}
 
 
 @app.post("/transits")
