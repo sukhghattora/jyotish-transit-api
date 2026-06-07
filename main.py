@@ -1,18 +1,21 @@
 """
 main.py — Jyotish Transit API v2
-Powered by VedAstro (free, no auth required).
+Powered by VedAstro (transits) + Swiss Ephemeris KP Krishnamurti (panchanga).
 
-Flow:
-  1. Validate query params (date format, lat/lon range, lagna sign)
-  2. Call ephemeris.get_planet_positions() → hits VedAstro API (or cache)
-  3. Call houses.calculate_houses() → Equal House placement
-  4. Return structured JSON response
+Endpoints:
+  GET /health
+  GET /transits          — planetary transits via VedAstro, house placement from Lagna
+  GET /panchanga         — full Vedic Panchanga (KP Krishnamurti ayanamsha)
+  GET /panchanga/moon-phase
+  GET /panchanga/hora
+  GET /panchanga/sunrise
 """
 
 import os
 import uuid
 import logging
 from datetime import datetime
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -20,6 +23,12 @@ from fastapi.responses import JSONResponse
 
 from ephemeris import get_planet_positions
 from houses import SIGNS, calculate_houses
+from panchang_calculator import (
+    calculate_panchanga,
+    calculate_sunrise_sunset,
+    get_moon_phase,
+    get_hora_chart,
+)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -32,8 +41,8 @@ logger = logging.getLogger(__name__)
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Jyotish Transit API",
-    version="2.0.0",
-    description="Real-time Vedic astrology transits via VedAstro. No API key needed.",
+    version="2.1.0",
+    description="Vedic transits via VedAstro + full Panchanga via Swiss Ephemeris (KP Krishnamurti ayanamsha).",
 )
 
 VALID_SIGNS = set(SIGNS)
@@ -42,7 +51,14 @@ VALID_SIGNS = set(SIGNS)
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/health", tags=["meta"])
 async def health():
-    return {"status": "ok", "service": "jyotish-transit-api", "version": "2.0.0"}
+    return {
+        "status": "ok",
+        "service": "jyotish-transit-api",
+        "version": "2.1.0",
+        "ayanamsha": "KP Krishnamurti (panchanga endpoints)",
+        "endpoints": ["/transits", "/panchanga", "/panchanga/moon-phase",
+                      "/panchanga/hora", "/panchanga/sunrise"],
+    }
 
 
 # ── Transits ──────────────────────────────────────────────────────────────────
@@ -134,6 +150,67 @@ async def get_transits(
         "timestamp":  datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "request_id": request_id,
     }
+
+
+# ── Panchanga (Swiss Ephemeris / KP Krishnamurti) ────────────────────────────
+
+@app.get("/panchanga", tags=["panchanga"])
+async def panchanga(
+    lat:  float = Query(..., ge=-90,  le=90,  description="Latitude"),
+    lon:  float = Query(..., ge=-180, le=180, description="Longitude"),
+    date: Optional[str] = Query(default=None, description="Date YYYY-MM-DD (default: today)"),
+    tz:   str = Query(default="UTC", description="Timezone e.g. Asia/Kolkata"),
+):
+    """
+    Full Vedic Panchanga using Swiss Ephemeris with KP Krishnamurti Ayanamsha.
+    Returns Tithi, Vara, Nakshatra (Moon), Yoga, Karana, KP Sub-lord,
+    Rahu Kala, Gulika, Yamaganda, Sunrise/Sunset, and auspiciousness notes.
+    """
+    try:
+        return calculate_panchanga(lat=lat, lon=lon, date_str=date, tz_str=tz)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Panchanga error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/panchanga/moon-phase", tags=["panchanga"])
+async def moon_phase(
+    date: Optional[str] = Query(default=None, description="Date YYYY-MM-DD (default: today)"),
+    tz:   str = Query(default="UTC"),
+):
+    """Moon phase: illumination %, waxing/waning, Tithi, Nakshatra, KP sub-lord."""
+    try:
+        return get_moon_phase(date_str=date, tz_str=tz)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/panchanga/hora", tags=["panchanga"])
+async def hora(
+    date: Optional[str] = Query(default=None, description="Date YYYY-MM-DD (default: today)"),
+    tz:   str = Query(default="UTC"),
+):
+    """Hora (hourly planetary rulership) chart — 24 lords starting from Vara lord."""
+    try:
+        return get_hora_chart(date_str=date, tz_str=tz)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/panchanga/sunrise", tags=["panchanga"])
+async def sunrise(
+    lat:  float = Query(..., ge=-90,  le=90,  description="Latitude"),
+    lon:  float = Query(..., ge=-180, le=180, description="Longitude"),
+    date: Optional[str] = Query(default=None, description="Date YYYY-MM-DD (default: today)"),
+    tz:   str = Query(default="UTC"),
+):
+    """Precise sunrise, sunset and solar noon in UTC and local time."""
+    try:
+        return calculate_sunrise_sunset(lat=lat, lon=lon, date_str=date, tz_str=tz)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
