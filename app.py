@@ -135,36 +135,77 @@ def get_prompt():
     return {"system_prompt": prompt_path.read_text()}
 
 
+def _compute_transits(req: TransitRequest):
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
+
+    bd = datetime.strptime(req.birth_date, "%Y-%m-%d")
+    time_parts = req.birth_time.split(":")
+    bh = int(time_parts[0])
+    bm = int(time_parts[1])
+    bs = int(time_parts[2]) if len(time_parts) > 2 else 0
+
+    birth_jd   = to_jd(bd.year, bd.month, bd.day, bh, bm, bs, req.birth_tz)
+    natal_pos  = get_positions(birth_jd)
+
+    now = datetime.utcnow()
+    transit_jd  = swe.julday(now.year, now.month, now.day,
+                              now.hour + now.minute / 60.0 + now.second / 3600.0)
+    transit_pos = get_positions(transit_jd)
+    aspects     = calc_aspects(transit_pos, natal_pos)
+
+    return {
+        "transit_date":      now.strftime("%Y-%m-%d"),
+        "transit_time_utc":  now.strftime("%H:%M"),
+        "natal_positions":   natal_pos,
+        "transit_positions": transit_pos,
+        "transit_aspects":   aspects,
+    }
+
+
+def _format_positions(label: str, positions: dict) -> str:
+    lines = [f"{label}:"]
+    for planet, data in positions.items():
+        lines.append(
+            f"  {planet}: {data['rashi']} {data['rashi_degrees']:.2f}° "
+            f"({data['nakshatra']} pada {data['nakshatra_pada']})"
+        )
+    return "\n".join(lines)
+
+
+def _build_context_block(data: dict) -> str:
+    transit_planets = _format_positions("Today's transit positions", data["transit_positions"])
+    natal_planets   = _format_positions("Natal positions", data["natal_positions"])
+
+    aspect_lines = []
+    for a in data["transit_aspects"]:
+        aspect_lines.append(
+            f"  Transit {a['transit_planet']} ({a['transit_rashi']}) "
+            f"{a['aspect']} natal {a['natal_planet']} ({a['natal_rashi']}) "
+            f"— orb {a['orb_deg']}°"
+        )
+    aspects_block = "Active aspects:\n" + ("\n".join(aspect_lines) if aspect_lines else "  None within orb")
+
+    return (
+        f"=== LIVE JYOTISH TRANSIT DATA ({data['transit_date']} {data['transit_time_utc']} UTC) ===\n\n"
+        f"{transit_planets}\n\n"
+        f"{natal_planets}\n\n"
+        f"{aspects_block}"
+    )
+
+
 @app.post("/transits")
 def get_transits(req: TransitRequest):
     try:
-        swe.set_sid_mode(swe.SIDM_LAHIRI)
+        return _compute_transits(req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        # Parse birth date/time
-        bd = datetime.strptime(req.birth_date, "%Y-%m-%d")
-        time_parts = req.birth_time.split(":")
-        bh = int(time_parts[0])
-        bm = int(time_parts[1])
-        bs = int(time_parts[2]) if len(time_parts) > 2 else 0
 
-        birth_jd   = to_jd(bd.year, bd.month, bd.day, bh, bm, bs, req.birth_tz)
-        natal_pos  = get_positions(birth_jd)
-
-        # Current moment (UTC)
-        now = datetime.utcnow()
-        transit_jd  = swe.julday(now.year, now.month, now.day,
-                                  now.hour + now.minute / 60.0 + now.second / 3600.0)
-        transit_pos = get_positions(transit_jd)
-
-        aspects = calc_aspects(transit_pos, natal_pos)
-
-        return {
-            "transit_date":      now.strftime("%Y-%m-%d"),
-            "transit_time_utc":  now.strftime("%H:%M"),
-            "natal_positions":   natal_pos,
-            "transit_positions": transit_pos,
-            "transit_aspects":   aspects,
-        }
-
+@app.post("/transits/context")
+def get_transits_context(req: TransitRequest):
+    """Returns a pre-formatted plain-text block ready to paste into an n8n AI node message."""
+    try:
+        data = _compute_transits(req)
+        return {"context": _build_context_block(data)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

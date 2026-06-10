@@ -34,6 +34,14 @@ Swiss Ephemeris microservice for real-time Vedic transit calculations.
 }
 ```
 
+### `POST /transits/context`
+
+Same request body as `/transits`. Returns a pre-formatted plain-text block with all live transit data embedded — pass this directly to your AI node message so the model has the actual positions.
+
+```json
+{ "context": "=== LIVE JYOTISH TRANSIT DATA (2026-06-10 08:30 UTC) ===\n\nToday's transit positions:\n  Sun: Taurus 25.40° ..." }
+```
+
 ### `GET /prompt`
 
 Returns the canonical system prompt for the n8n AI node — no remedies, pure transit interpretation.
@@ -42,10 +50,23 @@ Returns the canonical system prompt for the n8n AI node — no remedies, pure tr
 { "system_prompt": "You are a Jyotish (Vedic astrology) expert..." }
 ```
 
-Use this in your n8n HTTP Request node to keep the prompt version-controlled alongside the API. In your AI node, set the system prompt to the value returned by this endpoint.
-
 ### `GET /health`
 Returns `{"status": "ok"}`.
+
+## n8n Workflow Wiring
+
+The AI node must receive the live transit data or it will refuse to interpret. Correct flow:
+
+```
+[Trigger] → [HTTP Request: POST /transits/context] → [AI Node]
+                                                          ↑
+                                          System prompt: {{ $('HTTP Request (prompt)').item.json.system_prompt }}
+                                          User message:  {{ $json.context }}\n\nPlease interpret my transits.
+```
+
+1. **Node 1 — Get prompt** `GET <api-url>/prompt` → store `system_prompt`
+2. **Node 2 — Get transit context** `POST <api-url>/transits/context` with birth details → store `context`
+3. **Node 3 — AI node** — system prompt = output of Node 1, user message = output of Node 2
 
 ## Deploy to Railway
 
